@@ -132,12 +132,12 @@ class Graph(tk.Tk):
         return self.yMax - self.yMin
 
     @cached_property
-    def _xToPixelScale(self) -> int:
-        return int(self._xPixelSpan / self._xRange)
+    def _xToPixelScale(self) -> float:
+        return self._xPixelSpan / self._xRange
 
     @cached_property
-    def _yToPixelScale(self) -> int:
-        return int(self._yPixelSpan / self._yRange)
+    def _yToPixelScale(self) -> float:
+        return self._yPixelSpan / self._yRange
     
     def _xToPixel(self, x: float) -> int:
         return round((x - self.xMin) * self._xToPixelScale) + self._lineLeft
@@ -276,6 +276,7 @@ class Graph(tk.Tk):
         except IndexError:
             print("Cannot delete a line without lines of screen. If you are trying to delete a best fit line, use the",
                   '"removeBestFitLine button"')
+            return
 
         self.canvas.delete(line.toTag())
         self.lines.remove(line)
