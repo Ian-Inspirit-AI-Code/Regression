@@ -115,7 +115,8 @@ class Graph(tk.Tk):
 
     MARGIN = 75
 
-    INTERVALS = 2
+    X_INTERVALS = 1
+    Y_INTERVALS = 20
 
     LABEL_LENGTH = 5
 
@@ -136,9 +137,9 @@ class Graph(tk.Tk):
         self.canvas = tk.Canvas(self, bg=self.BACKGROUND_COLOR, height=self.HEIGHT, width=self.WIDTH)
         self.canvas.pack()
 
-        self.minX, self.minY = 0, 0
-        self.maxX = 20
-        self.maxY = 10
+        self.minX, self.minY = 6, -20
+        self.maxX = 10
+        self.maxY = 80
 
         self.initDisplay()
 
@@ -196,16 +197,16 @@ class Graph(tk.Tk):
         return int(self.yPixelSpan / self.yRange)
 
     def xToPixel(self, x: float) -> int:
-        return round(x * self._xToPixelScale) + self.lineLeft
+        return round((x - self.minX) * self._xToPixelScale) + self.lineLeft
 
     def yToPixel(self, y: float) -> int:
-        return self.lineBottom - round(y * self._yToPixelScale)
+        return self.lineBottom - round((y - self.minY) * self._yToPixelScale)
 
     def pixelToX(self, x: int) -> float:
-        return (x - self.lineLeft) / self._xToPixelScale
+        return (x - self.lineLeft) / self._xToPixelScale + self.minX
 
     def pixelToY(self, y: int) -> float:
-        return (self.lineBottom - y) / self._yToPixelScale
+        return (self.lineBottom - y) / self._yToPixelScale + self.minY
 
     def initDisplay(self):
         self.createAxis()
@@ -234,7 +235,7 @@ class Graph(tk.Tk):
                                     text=str(x), justify=tk.CENTER, font=(self.FONT, self.FONT_SIZE),
                                     tags="xLabel")
 
-            x += self.INTERVALS
+            x += self.X_INTERVALS
 
         y = self.minY
         while y <= self.maxY:
@@ -246,9 +247,9 @@ class Graph(tk.Tk):
                                     text=str(y), justify=tk.CENTER, font=(self.FONT, self.FONT_SIZE),
                                     tags="yLabel")
 
-            y += self.INTERVALS
+            y += self.Y_INTERVALS
 
-    def plot(self, point: Point, linePoint=False):
+    def plot(self, point: Point, linePoint=False, showResidual=True):
         fill = self.LINE_POINT_COLOR if linePoint else self.DOT_COLOR
 
         x, y = point.x, point.y
@@ -264,10 +265,10 @@ class Graph(tk.Tk):
         else:
             self.points.append(point)
 
-        if self.line and point not in self.line:
+        if showResidual and self.line and point not in self.line:
             self.showResidual(point, self.line)
 
-    def createLine(self, line: Line, showPoints=False):
+    def createLine(self, line: Line, showPoints=False, showResidual=True):
 
         interceptX, interceptY = self.lineLeft, self.yToPixel(line.intercept)
         endX, endY = self.lineRight, self.yToPixel(line(self.maxX))
@@ -280,11 +281,12 @@ class Graph(tk.Tk):
 
         self.canvas.delete("residual")
         if showPoints:
-            self.plot(line.point1, linePoint=True)
-            self.plot(line.point2, linePoint=True)
+            self.plot(line.point1, linePoint=True, showResidual=showResidual)
+            self.plot(line.point2, linePoint=True, showResidual=showResidual)
 
-        for point in self.points:
-            self.showResidual(point, line)
+        if showResidual:
+            for point in self.points:
+                self.showResidual(point, line)
 
         # print(line.calculateRSquared(self.points))
 
@@ -306,7 +308,7 @@ class Graph(tk.Tk):
 
         return residual
 
-    def createBestFitLine(self):
+    def createBestFitLine(self, showResidual=False):
         if not self.points:
             return
 
@@ -333,13 +335,13 @@ class Graph(tk.Tk):
 
                     # print(residual, intercept, endPoint)
 
-                endPoint.y += 0.05
+                endPoint.y += self.yRange // 35
 
-            intercept.y += 0.05
+            intercept.y += self.yRange // 35
 
             endPoint.y = self.minY
 
-        self.createLine(bestLine)
+        self.createLine(bestLine, showResidual=showResidual)
 
     def display(self):
         try:
@@ -400,6 +402,10 @@ class Graph(tk.Tk):
             self.linePoints = []
 
             self.createLine(changeLine)
+
+        showResidual = False
+        if not showResidual:
+            return
 
         self.canvas.delete("residual")
         for point in self.points:
