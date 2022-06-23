@@ -1,347 +1,159 @@
 import tkinter as tk
 
-from numpy import sin, cos, arctan
-from copy import deepcopy
+from Line import Line, SlopeIntercept
+from Point import Point
 
+from functools import cached_property
+from itertools import takewhile, count, product
 
-class Point:
-
-    COUNTER = 0
-
-    def __init__(self, x: float, y: float):
-        self.x = x
-        self.y = y
-
-        self.number = self.COUNTER
-
-    def __eq__(self, other):
-        return self.x == other.x and self.y == other.y
-
-    def __le__(self, other: float):
-        return self.x <= other and self.y <= other
-
-    def __ge__(self, other: float):
-        return self.x >= other and self.y >= other
-
-    def __sub__(self, other):
-        return Point(self.x - other.x, self.y - other.y)
-
-    def __add__(self, other):
-        return Point(self.x + other.x, self.y + other.y)
-
-    def __abs__(self):
-        self.x = abs(self.x)
-        self.y = abs(self.y)
-
-        return self
-
-    def __str__(self):
-        return f"({self.x},{self.y})"
-
-    def __deepcopy__(self, memo):
-        return Point(self.x, self.y)
-
-    def close(self, other, maximumOffset: float):
-        difference = abs(self - other)
-        return difference <= maximumOffset
-
-
-class Line:
-    COUNTER = 0
-
-    def __init__(self, point1: Point, point2: Point):
-        self.point1 = point1
-        self.point2 = point2
-
-        self.number = self.COUNTER
-
-    @property
-    def slope(self):
-        return (self.point2.y - self.point1.y) / (self.point2.x - self.point1.x)
-
-    @property
-    def intercept(self):
-        return self(0)
-
-    def residual(self, point: Point):
-        return point.y - self(point.x)
-
-    def __call__(self, x) -> float:
-        return self.slope * (x - self.point1.x) + self.point1.y
-
-    def __contains__(self, item: Point):
-        return item == self.point1 or item == self.point2
-
-    def __str__(self):
-        return f"{self.point1}--{self.point2}"
-
-    def __deepcopy__(self, memo):
-        return Line(deepcopy(self.point1), deepcopy(self.point2))
-
-    def calculateDistance(self, point: Point, residual: float) -> float:
-        y = point.y + residual
-        theta = arctan((y - self.intercept) / point.x)
-
-        return cos(theta) * residual
-
-    def calculateRSquared(self, points: list[Point]):
-        if not points:
-            return 0
-
-        average = sum([point.y for point in points]) / len(points)
-
-        baselineDifferencesSquared = [(point.y - average) ** 2 for point in points]
-
-        # print(average, residualsArraySquared, baselineDifferencesSquared)
-        # print("aaa", sum(residualsArraySquared))
-
-        return 1 - self.sumResidualSquared(points) / sum(baselineDifferencesSquared)
-
-    def sumResidualSquared(self, points: list[Point]):
-        if not points:
-            return 0
-
-        return sum([self.residual(point) ** 2 for point in points])
+from numpy import arange, polyfit
 
 
 class Graph(tk.Tk):
-    BACKGROUND_COLOR = "#F8DAD4"
+    DEFAULT_BACKGROUND_COLOR = "#F8DAD4"
 
-    LINE_COLOR = "#0C51FA"
-    LINE_THICKNESS = 3
+    DEFAULT_HEIGHT_PIXEL = 450
+    DEFAULT_WIDTH_PIXEL = 800
+    DEFAULT_MARGIN = 75
 
-    HEIGHT = 450
-    WIDTH = 800
+    DEFAULT_X_LABEL_INTERVAL = 1
+    DEFAULT_Y_LABEL_INTERVAL = 1
+    DEFAULT_LABEL_LENGTH = 5
 
-    MARGIN = 75
+    DEFAULT_FONT_SIZE = 10
+    DEFAULT_FONT = "Arial"
 
-    X_INTERVALS = 1
-    Y_INTERVALS = 20
+    DEFAULT_POINT_RADIUS = 6
+    DEFAULT_POINT_COLOR = "#FD0B0B"
 
-    LABEL_LENGTH = 5
+    DEFAULT_LINE_THICKNESS = 3
+    DEFAULT_LINE_COLOR = "#0C51FA"
 
-    FONT_SIZE = 10
-    FONT = "Arial"
+    DEFAULT_RESIDUAL_COLOR = "#DD5FF8"
+    DEFAULT_RESIDUAL_STIPPLE = "gray25"
 
-    DOT_SIZE = 12
-    DOT_COLOR = "#FD0B0B"
-    LINE_POINT_COLOR = "#5FEEF8"
+    DEFAULT_X_MIN = 0
+    DEFAULT_Y_MIN = 0
+    DEFAULT_X_MAX = 20
+    DEFAULT_Y_MAX = 10
 
-    RESIDUAL_COLOR = "#DD5FF8"
+    DEFAULT_DRAG_POINT_VARIABILITY_PIXEL = 25
 
-    POINT_MAXIMUM_OFFSET = 1
+    def __init__(self, *,
+                 backgroundColor=DEFAULT_BACKGROUND_COLOR,
+                 height=DEFAULT_HEIGHT_PIXEL, width=DEFAULT_WIDTH_PIXEL, margin=DEFAULT_MARGIN,
+                 xLabelInterval=DEFAULT_X_LABEL_INTERVAL, yLabelInterval=DEFAULT_Y_LABEL_INTERVAL,
+                 labelLength=DEFAULT_LABEL_LENGTH,
+                 fontSize=DEFAULT_FONT_SIZE, font=DEFAULT_FONT,
+                 pointRadius=DEFAULT_POINT_RADIUS, pointColor=DEFAULT_POINT_COLOR,
+                 lineThickness=DEFAULT_LINE_THICKNESS, lineColor=DEFAULT_LINE_COLOR,
+                 residualColor=DEFAULT_RESIDUAL_COLOR, residualStipple=DEFAULT_RESIDUAL_STIPPLE,
+                 xMin=DEFAULT_X_MIN, xMax=DEFAULT_X_MAX, yMin=DEFAULT_Y_MIN, yMax=DEFAULT_Y_MAX,
+                 dragVariability=DEFAULT_DRAG_POINT_VARIABILITY_PIXEL,
+                 dragLine=True, showResidual=False):
 
-    def __init__(self):
         super().__init__()
 
-        self.canvas = tk.Canvas(self, bg=self.BACKGROUND_COLOR, height=self.HEIGHT, width=self.WIDTH)
+        self.bg = backgroundColor
+        self.height = height
+        self.width = width
+        self.margin = margin
+        self.xLabelInterval = xLabelInterval
+        self.yLabelInterval = yLabelInterval
+        self.labelLength = labelLength
+        self.fontSize = fontSize
+        self.font = font
+        self.pointRadius = pointRadius
+        self.pointColor = pointColor
+        self.lineThickness = lineThickness
+        self.lineColor = lineColor
+        self.residualColor = residualColor
+        self.residualStipple = residualStipple
+        self.xMin = xMin
+        self.yMin = yMin
+        self.xMax = xMax
+        self.yMax = yMax
+        self.dragVariability = dragVariability
+
+        self.dragLine = dragLine
+        self.showResidual = showResidual
+        
+        self.canvas = tk.Canvas(self, bg=self.bg, height=self.height, width=self.width)
         self.canvas.pack()
+        
+        w = 20
+        h = 2
+        tk.Button(self, text="Show line of best fit", width=w, height=h, command=self.createBestFitLine).pack()
+        tk.Button(self, text="Hide line of best fit", width=w, height=h, command=self.removeBestFitLine).pack()
+        tk.Button(self, text="Toggle residual", width=w, height=h, command=self.toggleResidual).pack()
+        tk.Button(self, text="DeleteLine", width=w, height=h, command=self.deleteLine).pack()
 
-        self.minX, self.minY = 6, -20
-        self.maxX = 10
-        self.maxY = 80
+        self.bind('<Button-1>', self.mouseClick)  # left click
+        self.bind('<ButtonRelease-1>', lambda _: self.mouseRelease())  # left click release
+        self.bind('<Motion>', self.motion)  # mouse moving
 
-        self.initDisplay()
-
-        self.line = None
-        self.linePoints = []
         self.points = []
+        self.lines = []
 
         self.draggingPoint = None
 
-        self.button = tk.Button(self, text="Line of best fit", width=20, height=2, command=self.createBestFitLine)
-        self.button.pack()
+        self.initDisplay()
 
-        self.bind('<Button-1>', self.mouseClick)  # left click
-        self.bind('<ButtonRelease-1>', lambda event: self.mouseRelease())  # left click release
-        self.bind('<Motion>', self.motion)  # mouse moving
+    @cached_property
+    def _lineBottom(self) -> int:
+        return self.height - self.margin
 
-    @property
-    def lineBottom(self) -> int:
-        return self.HEIGHT - self.MARGIN
+    @cached_property
+    def _lineTop(self) -> int:
+        return self.margin
 
-    @property
-    def lineTop(self) -> int:
-        return self.MARGIN
+    @cached_property
+    def _lineLeft(self) -> int:
+        return self.margin
 
-    @property
-    def lineLeft(self) -> int:
-        return self.MARGIN
+    @cached_property
+    def _lineRight(self) -> int:
+        return self.width - self.margin
 
-    @property
-    def lineRight(self) -> int:
-        return self.WIDTH - self.MARGIN
+    @cached_property
+    def _xPixelSpan(self) -> float:
+        return self.width - 2 * self.margin
 
-    @property
-    def xPixelSpan(self) -> float:
-        return self.WIDTH - self.MARGIN - self.MARGIN
+    @cached_property
+    def _yPixelSpan(self) -> float:
+        return self.height - 2 * self.margin
 
-    @property
-    def yPixelSpan(self) -> float:
-        return self.HEIGHT - self.MARGIN - self.MARGIN
+    @cached_property
+    def _xRange(self) -> float:
+        return self.xMax - self.xMin
 
-    @property
-    def xRange(self) -> float:
-        return self.maxX - self.minX
+    @cached_property
+    def _yRange(self) -> float:
+        return self.yMax - self.yMin
 
-    @property
-    def yRange(self) -> float:
-        return self.maxY - self.minY
-
-    @property
+    @cached_property
     def _xToPixelScale(self) -> int:
-        return int(self.xPixelSpan / self.xRange)
+        return int(self._xPixelSpan / self._xRange)
 
-    @property
+    @cached_property
     def _yToPixelScale(self) -> int:
-        return int(self.yPixelSpan / self.yRange)
+        return int(self._yPixelSpan / self._yRange)
+    
+    def _xToPixel(self, x: float) -> int:
+        return round((x - self.xMin) * self._xToPixelScale) + self._lineLeft
 
-    def xToPixel(self, x: float) -> int:
-        return round((x - self.minX) * self._xToPixelScale) + self.lineLeft
+    def _yToPixel(self, y: float) -> int:
+        return self._lineBottom - round((y - self.yMin) * self._yToPixelScale)
 
-    def yToPixel(self, y: float) -> int:
-        return self.lineBottom - round((y - self.minY) * self._yToPixelScale)
+    def _pixelToX(self, x: int) -> float:
+        return (x - self._lineLeft) / self._xToPixelScale + self.xMin
 
-    def pixelToX(self, x: int) -> float:
-        return (x - self.lineLeft) / self._xToPixelScale + self.minX
-
-    def pixelToY(self, y: int) -> float:
-        return (self.lineBottom - y) / self._yToPixelScale + self.minY
+    def _pixelToY(self, y: int) -> float:
+        return (self._lineBottom - y) / self._yToPixelScale + self.yMin
 
     def initDisplay(self):
         self.createAxis()
         self.createLabels()
-
-    def createAxis(self):
-
-        color = self.LINE_COLOR
-        width = self.LINE_THICKNESS
-
-        self.canvas.create_line(self.lineLeft, self.lineBottom, self.lineRight, self.lineBottom,
-                                tags="xAxis", width=width, fill=color)
-
-        self.canvas.create_line(self.lineLeft, self.lineBottom, self.lineLeft, self.lineTop,
-                                tags="yAxis", width=width, fill=color)
-
-    def createLabels(self):
-
-        x = self.minX
-        while x <= self.maxX:
-            xPixel = self.xToPixel(x)
-            self.canvas.create_line(xPixel, self.lineBottom, xPixel, self.lineBottom + self.LABEL_LENGTH,
-                                    tags="xAxis")
-
-            self.canvas.create_text(xPixel, self.lineBottom + self.LABEL_LENGTH + self.FONT_SIZE,
-                                    text=str(x), justify=tk.CENTER, font=(self.FONT, self.FONT_SIZE),
-                                    tags="xLabel")
-
-            x += self.X_INTERVALS
-
-        y = self.minY
-        while y <= self.maxY:
-            yPixel = self.yToPixel(y)
-            self.canvas.create_line(self.lineLeft, yPixel, self.lineLeft - self.LABEL_LENGTH, yPixel,
-                                    tags="yAxis")
-
-            self.canvas.create_text(self.lineLeft - self.LABEL_LENGTH - self.FONT_SIZE, yPixel,
-                                    text=str(y), justify=tk.CENTER, font=(self.FONT, self.FONT_SIZE),
-                                    tags="yLabel")
-
-            y += self.Y_INTERVALS
-
-    def plot(self, point: Point, linePoint=False, showResidual=True):
-        fill = self.LINE_POINT_COLOR if linePoint else self.DOT_COLOR
-
-        x, y = point.x, point.y
-        xPixel, yPixel = self.xToPixel(x), self.yToPixel(y)
-        radius = self.DOT_SIZE // 2
-
-        self.canvas.create_oval(xPixel - radius, yPixel - radius, xPixel + radius, yPixel + radius,
-                                fill=fill, tags=f"Point:{point.number}")
-        Point.COUNTER += 1
-
-        if linePoint:
-            self.linePoints.append(point)
-        else:
-            self.points.append(point)
-
-        if showResidual and self.line and point not in self.line:
-            self.showResidual(point, self.line)
-
-    def createLine(self, line: Line, showPoints=False, showResidual=True):
-
-        interceptX, interceptY = self.lineLeft, self.yToPixel(line.intercept)
-        endX, endY = self.lineRight, self.yToPixel(line(self.maxX))
-
-        self.canvas.create_line(interceptX, interceptY, endX, endY,
-                                tags=f"Line:{line.number}")
-        Line.COUNTER += 1
-
-        self.line = line
-
-        self.canvas.delete("residual")
-        if showPoints:
-            self.plot(line.point1, linePoint=True, showResidual=showResidual)
-            self.plot(line.point2, linePoint=True, showResidual=showResidual)
-
-        if showResidual:
-            for point in self.points:
-                self.showResidual(point, line)
-
-        # print(line.calculateRSquared(self.points))
-
-    def showResidual(self, point: Point, line: Line) -> float:
-        residual = line.residual(point)
-
-        linePixelX, linePixelY = self.xToPixel(point.x), self.yToPixel(point.y)
-
-        if line.slope < 0:
-            cornerPixelX = linePixelX + self._xToPixelScale * residual
-            cornerPixelY = linePixelY + self._yToPixelScale * residual
-        else:
-            cornerPixelX = linePixelX - self._xToPixelScale * residual
-            cornerPixelY = linePixelY + self._yToPixelScale * residual
-
-        self.canvas.create_rectangle(cornerPixelX, cornerPixelY, linePixelX, linePixelY,
-                                     fill=self.RESIDUAL_COLOR, stipple="gray25",
-                                     tags="residual")
-
-        return residual
-
-    def createBestFitLine(self, showResidual=False):
-        if not self.points:
-            return
-
-        if self.line:
-            self.canvas.delete(f"Line:{self.line.number}")
-
-        middle = (self.minX + self.maxX) / 2
-        intercept = Point(middle, self.minY)
-        endPoint = Point(middle + self.xRange / 10, self.minY)
-
-        line = Line(intercept, endPoint)
-        bestLine = deepcopy(line)
-
-        bestResidual = line.sumResidualSquared(self.points)
-
-        while intercept.y < self.maxY:
-
-            while endPoint.y < self.maxY:
-
-                residual = line.sumResidualSquared(self.points)
-                if residual < bestResidual:
-                    bestResidual = residual
-                    bestLine = deepcopy(line)
-
-                    # print(residual, intercept, endPoint)
-
-                endPoint.y += self.yRange // 35
-
-            intercept.y += self.yRange // 35
-
-            endPoint.y = self.minY
-
-        self.createLine(bestLine, showResidual=showResidual)
 
     def display(self):
         try:
@@ -352,16 +164,188 @@ class Graph(tk.Tk):
             # print("Exiting")
             pass
 
+    def createAxis(self):
+        color = self.lineColor
+        width = self.lineThickness
+
+        self.canvas.create_line(self._lineLeft, self._lineBottom, self._lineRight, self._lineBottom,
+                                tags="xAxis", width=width, fill=color)
+
+        self.canvas.create_line(self._lineLeft, self._lineBottom, self._lineLeft, self._lineTop,
+                                tags="yAxis", width=width, fill=color)
+
+    def createLabels(self):
+
+        for x in takewhile(lambda xValue: xValue <= self._lineRight,
+                           count(self._lineLeft, self.xLabelInterval * self._xToPixelScale)):
+            self.canvas.create_line(x, self._lineBottom, x, self._lineBottom + self.labelLength, tags="xAxis")
+            self.canvas.create_text(x, self._lineBottom + self.labelLength + self.fontSize,
+                                    text=str(self._pixelToX(x)), justify=tk.CENTER, font=(self.font, self.fontSize),
+                                    tags="xLabel")
+
+        for y in takewhile(lambda yValue: yValue >= self._lineTop,
+                           count(self._lineBottom, - self.yLabelInterval * self._yToPixelScale)):
+            self.canvas.create_line(self._lineLeft, y, self._lineLeft - self.labelLength, y, tags="yAxis")
+            self.canvas.create_text(self._lineLeft - self.labelLength - self.fontSize, y,
+                                    text=str(self._pixelToY(y)), justify=tk.CENTER, font=(self.font, self.fontSize),
+                                    tags="yLabel")
+
+    def plot(self, point: Point, partOfLine=False):
+        x, y = self._xToPixel(point.x), self._yToPixel(point.y)
+        r = self.pointRadius
+
+        fill = self.lineColor if partOfLine else self.pointColor
+        self.canvas.create_oval(x - r, y - r, x + r, y + r,
+                                fill=fill, tags=point.toTag())
+
+        self.points.append(point)
+
+        # TODO: residuals
+
+    def removePoint(self, point: Point):
+        self.canvas.delete(point.toTag())
+
+        try:
+            self.points.remove(point)
+        except ValueError:
+            pass
+
+    def updatePoint(self, p: Point, newPixelX: int, newPixelY: int):
+        x, y = p.x, p.y
+        newX, newY = self._pixelToX(newPixelX), self._pixelToY(newPixelY)
+
+        pixelX, pixelY = self._xToPixel(x), self._yToPixel(y)
+
+        dx, dy = newPixelX - pixelX, newPixelY - pixelY
+
+        p.x, p.y = newX, newY
+
+        self.canvas.move(p.toTag(), dx, dy)
+
+    def leftRightOfLine(self, line: Line):
+        valueAtMin = line(self.xMin)
+
+        if self.yMin <= valueAtMin <= self.yMax:
+            pLeft = Point(self.xMin, valueAtMin)
+        elif valueAtMin < self.yMin and line.slope > 0:
+            pLeft = line.pointAtY(self.xMin)
+        elif valueAtMin > self.yMax and line.slope < 0:
+            pLeft = line.pointAtY(self.yMax)
+        else:
+            return
+
+        valueAtMax = line(self.xMax)
+        if self.yMin <= valueAtMax <= self.yMax:
+            pRight = Point(self.xMax, valueAtMax)
+        elif valueAtMax < self.yMin and line.slope < 0:
+            pRight = line.pointAtY(self.xMin)
+        elif valueAtMax > self.yMax and line.slope > 0:
+            pRight = line.pointAtY(self.yMax)
+        else:
+            return
+
+        return pLeft, pRight
+
+    def createLine(self, line: Line, plotPoints=True, updateLine=False, addToLines=True, tag=None):
+        try:
+            pLeft, pRight = self.leftRightOfLine(line)
+        except ValueError:
+            return
+
+        if plotPoints:
+            self.plot(pLeft, partOfLine=True)
+            self.plot(pRight, partOfLine=True)
+
+        if not updateLine:
+            line.point1, line.point2 = pLeft, pRight
+
+        if addToLines:
+            self.lines.append(line)
+
+        tag = line.toTag() if tag is None else tag
+
+        self.canvas.create_line(self._xToPixel(pLeft.x), self._yToPixel(pLeft.y),
+                                self._xToPixel(pRight.x), self._yToPixel(pRight.y),
+                                tags=tag, fill=self.lineColor)
+
+        self.updateResiduals()
+
+    def deleteLine(self, line: Line = None):
+        try:
+            line = self.lines[0] if line is None else line
+        except IndexError:
+            print("Cannot delete a line without lines of screen. If you are trying to delete a best fit line, use the",
+                  '"removeBestFitLine button"')
+
+        self.canvas.delete(line.toTag())
+        self.lines.remove(line)
+
+        list(map(lambda p: self.removePoint(p), line.displayedPoints))
+
+        self.updateResiduals()
+
+    def updateLine(self, line):
+        self.canvas.delete(line.toTag())
+        self.createLine(line, False, True)
+
+    def createBestFitLine(self):
+        self.removeBestFitLine()
+
+        pointListX, pointListY = [point.x for point in self.points], [point.y for point in self.points]
+        polyCoefficients = polyfit(pointListX, pointListY, 1)
+
+        slope, intercept = polyCoefficients[0], polyCoefficients[1]
+
+        line = SlopeIntercept(slope, intercept)
+        self.createLine(line, plotPoints=False, updateLine=False, addToLines=True, tag="bestFit")
+
+        self.updateResiduals()
+
+    def removeBestFitLine(self):
+        self.canvas.delete("bestFit")
+        self.lines = [line for line in self.lines if not isinstance(line, SlopeIntercept)]
+
+        self.updateResiduals()
+
+    def toggleResidual(self):
+        if len(self.lines) != 1 and not self.showResidual:
+            print("Cannot show residuals when there is not exactly 1 line on screen")
+            return
+
+        self.showResidual = not self.showResidual
+        self.updateResiduals()
+
+    def updateResiduals(self):
+        self.showResidual = self.showResidual and len(self.lines) == 1
+
+        if self.showResidual:
+            list(map(lambda point: self.showResidualPoint(point, self.lines[0]), self.points))
+        else:
+            self.canvas.delete("residual")
+
+    def showResidualPoint(self, point: Point, line: Line):
+        residual = line.residual(point)
+
+        linePixelX, linePixelY = self._xToPixel(point.x), self._yToPixel(point.y)
+
+        if line.slope < 0:
+            cornerPixelX = linePixelX + self._xToPixelScale * residual
+            cornerPixelY = linePixelY + self._yToPixelScale * residual
+        else:
+            cornerPixelX = linePixelX - self._xToPixelScale * residual
+            cornerPixelY = linePixelY + self._yToPixelScale * residual
+
+        self.canvas.create_rectangle(cornerPixelX, cornerPixelY, linePixelX, linePixelY,
+                                     fill=self.residualColor, stipple=self.residualStipple,
+                                     tags="residual")
+
+        return residual
+
     def mouseClick(self, event):
-        pixelX, pixelY = event.x, event.y
-        x, y = self.pixelToX(pixelX), self.pixelToY(pixelY)
-        point = Point(x, y)
+        point = Point(self._pixelToX(event.x), self._pixelToY(event.y))
 
-        # if the mouse clicked on a point
-        # alternatively can use canvas.find_closest
-
-        for p in self.points + self.linePoints:
-            if point.close(p, self.POINT_MAXIMUM_OFFSET):
+        for p in self.points:
+            if point.close(p, self.dragVariability / self._xToPixelScale, self.dragVariability / self._yToPixelScale):
                 self.draggingPoint = p
                 break
         else:
@@ -369,46 +353,21 @@ class Graph(tk.Tk):
 
     def mouseRelease(self):
         self.draggingPoint = None
-
+    
     def motion(self, event):
-        if self.draggingPoint is None:
+        p = self.draggingPoint
+
+        if p is None:
             return
 
-        changeLine = None
-
-        if self.line and self.draggingPoint in self.line:
-            changeLine = self.line
-
-            self.linePoints.remove(self.draggingPoint)
-            linePoint = True
-        else:
-            self.points.remove(self.draggingPoint)
-            linePoint = False
-
-        x = self.pixelToX(event.x)
-        y = self.pixelToY(event.y)
-
-        self.canvas.delete(f"Point:{self.draggingPoint.number}")
-
-        self.draggingPoint.x = x
-        self.draggingPoint.y = y
-
-        self.plot(self.draggingPoint, linePoint=linePoint)
-
-        if changeLine is not None:
-            self.canvas.delete(f"Line:{changeLine.number}")
-            for point in self.linePoints:
-                self.canvas.delete(f"Point:{point.number}")
-            self.linePoints = []
-
-            self.createLine(changeLine)
-
-        showResidual = False
-        if not showResidual:
+        if not (self._lineRight >= event.x >= self._lineLeft and self._lineTop <= event.y <= self._lineBottom):
             return
 
-        self.canvas.delete("residual")
-        for point in self.points:
+        self.updatePoint(p, event.x, event.y)
 
-            if self.line and point not in self.line:
-                self.showResidual(point, self.line)
+        if self.dragLine and self.lines:
+            try:
+                line = next(line for line in self.lines if p in line)
+                self.updateLine(line)
+            except StopIteration:
+                pass
