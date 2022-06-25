@@ -7,9 +7,9 @@ from GraphSettings import GraphSettings
 from GraphInterface import GraphInterface
 
 from functools import cached_property
-from itertools import takewhile, count, product
+from itertools import takewhile, count
 
-from numpy import arange, polyfit
+from numpy import polyfit
 
 
 class Graph(tk.Tk, GraphSettings):
@@ -255,8 +255,8 @@ class Graph(tk.Tk, GraphSettings):
     def createBestFitLine(self):
         self.removeBestFitLine()
 
-        if not self.points:
-            print("There are no points on screen. Please plot a point")
+        if len(self.points) < 2:
+            print(f"There are not enough points on screen ({len(self.points)}). Please plot a point")
             return
 
         pointListX, pointListY = [point.x for point in self.points], [point.y for point in self.points]

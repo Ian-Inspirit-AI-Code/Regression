@@ -1,6 +1,7 @@
 from Point import Point, randomPoint
 
 from numpy import cos, arctan
+from copy import deepcopy
 
 
 class Line:
@@ -90,11 +91,11 @@ class PointSlopeLine(Line):
         super().__init__(point, Point(point.x + 1, point.y + slope))
 
     def equation(self):
-        return f"y = {slope}(x-{self.point1.x}) + {self.point1.y}"
+        return f"y = {self.slope}(x-{self.point1.x}) + {self.point1.y}"
 
     @property
     def displayedPoints(self):
-        return [self.points1]
+        return [self.point1]
 
 
 class SlopeIntercept(Line):
@@ -106,7 +107,7 @@ class SlopeIntercept(Line):
         return [self.point1]
 
     def equation(self):
-        return f"y = {slope}x + {self.intercept}"
+        return f"y = {self.slope}x + {self.intercept}"
 
 
 def randomLine(xMin, xMax, yMin, yMax) -> Line:
