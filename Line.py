@@ -15,7 +15,10 @@ class Line:
 
     @property
     def slope(self):
-        return (self.point2.y - self.point1.y) / (self.point2.x - self.point1.x)
+        try:
+            return (self.point2.y - self.point1.y) / (self.point2.x - self.point1.x)
+        except ZeroDivisionError:
+            return 1000
 
     @property
     def intercept(self):

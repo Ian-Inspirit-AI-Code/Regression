@@ -1,7 +1,10 @@
 import tkinter as tk
 
-from Line import Line, SlopeIntercept
-from Point import Point
+from Line import Line, SlopeIntercept, randomLine
+from Point import Point, randomPoint
+
+from GraphSettings import GraphSettings
+from GraphInterface import GraphInterface
 
 from functools import cached_property
 from itertools import takewhile, count, product
@@ -9,95 +12,44 @@ from itertools import takewhile, count, product
 from numpy import arange, polyfit
 
 
-class Graph(tk.Tk):
-    DEFAULT_BACKGROUND_COLOR = "#F8DAD4"
+class Graph(tk.Tk, GraphSettings):
 
-    DEFAULT_HEIGHT_PIXEL = 450
-    DEFAULT_WIDTH_PIXEL = 800
-    DEFAULT_MARGIN = 75
+    def __init__(self, **settings):
 
-    DEFAULT_X_LABEL_INTERVAL = 1
-    DEFAULT_Y_LABEL_INTERVAL = 1
-    DEFAULT_LABEL_LENGTH = 5
+        tk.Tk.__init__(self)
+        GraphSettings.__init__(self, **settings)
 
-    DEFAULT_FONT_SIZE = 10
-    DEFAULT_FONT = "Arial"
-
-    DEFAULT_POINT_RADIUS = 6
-    DEFAULT_POINT_COLOR = "#FD0B0B"
-
-    DEFAULT_LINE_THICKNESS = 3
-    DEFAULT_LINE_COLOR = "#0C51FA"
-
-    DEFAULT_RESIDUAL_COLOR = "#DD5FF8"
-    DEFAULT_RESIDUAL_STIPPLE = "gray25"
-
-    DEFAULT_X_MIN = 0
-    DEFAULT_Y_MIN = 0
-    DEFAULT_X_MAX = 20
-    DEFAULT_Y_MAX = 10
-
-    DEFAULT_DRAG_POINT_VARIABILITY_PIXEL = 25
-
-    def __init__(self, *,
-                 backgroundColor=DEFAULT_BACKGROUND_COLOR,
-                 height=DEFAULT_HEIGHT_PIXEL, width=DEFAULT_WIDTH_PIXEL, margin=DEFAULT_MARGIN,
-                 xLabelInterval=DEFAULT_X_LABEL_INTERVAL, yLabelInterval=DEFAULT_Y_LABEL_INTERVAL,
-                 labelLength=DEFAULT_LABEL_LENGTH,
-                 fontSize=DEFAULT_FONT_SIZE, font=DEFAULT_FONT,
-                 pointRadius=DEFAULT_POINT_RADIUS, pointColor=DEFAULT_POINT_COLOR,
-                 lineThickness=DEFAULT_LINE_THICKNESS, lineColor=DEFAULT_LINE_COLOR,
-                 residualColor=DEFAULT_RESIDUAL_COLOR, residualStipple=DEFAULT_RESIDUAL_STIPPLE,
-                 xMin=DEFAULT_X_MIN, xMax=DEFAULT_X_MAX, yMin=DEFAULT_Y_MIN, yMax=DEFAULT_Y_MAX,
-                 dragVariability=DEFAULT_DRAG_POINT_VARIABILITY_PIXEL,
-                 dragLine=True, showResidual=False):
-
-        super().__init__()
-
-        self.bg = backgroundColor
-        self.height = height
-        self.width = width
-        self.margin = margin
-        self.xLabelInterval = xLabelInterval
-        self.yLabelInterval = yLabelInterval
-        self.labelLength = labelLength
-        self.fontSize = fontSize
-        self.font = font
-        self.pointRadius = pointRadius
-        self.pointColor = pointColor
-        self.lineThickness = lineThickness
-        self.lineColor = lineColor
-        self.residualColor = residualColor
-        self.residualStipple = residualStipple
-        self.xMin = xMin
-        self.yMin = yMin
-        self.xMax = xMax
-        self.yMax = yMax
-        self.dragVariability = dragVariability
-
-        self.dragLine = dragLine
-        self.showResidual = showResidual
-        
         self.canvas = tk.Canvas(self, bg=self.bg, height=self.height, width=self.width)
         self.canvas.pack()
-        
-        w = 20
-        h = 2
-        tk.Button(self, text="Show line of best fit", width=w, height=h, command=self.createBestFitLine).pack()
-        tk.Button(self, text="Hide line of best fit", width=w, height=h, command=self.removeBestFitLine).pack()
-        tk.Button(self, text="Toggle residual", width=w, height=h, command=self.toggleResidual).pack()
-        tk.Button(self, text="DeleteLine", width=w, height=h, command=self.deleteLine).pack()
+
+        self.interface = self.openInterface()
 
         self.bind('<Button-1>', self.mouseClick)  # left click
         self.bind('<ButtonRelease-1>', lambda _: self.mouseRelease())  # left click release
         self.bind('<Motion>', self.motion)  # mouse moving
 
         self.points = []
-        self.lines = []
+        self.linesAndTags = []
 
         self.draggingPoint = None
 
         self.initDisplay()
+
+    def openInterface(self) -> GraphInterface:
+        interface = GraphInterface(self)
+        self.createButtons(interface)
+
+        return interface
+
+    def createButtons(self, interface: GraphInterface):
+
+        interface.createButton(text="Show line of best fit", command=self.createBestFitLine)
+        interface.createButton(text="Hide line of best fit", command=self.removeBestFitLine)
+        interface.createButton(text="Toggle residual", command=self.toggleResidual)
+        interface.createButton(text="Create random line", command=self.createRandomLine)
+        interface.createButton(text="Create random point", command=self.plotRandomPoint)
+        interface.createButton(text="Delete point", command=self.removePoint)
+        interface.createButton(text="Delete line", command=self.deleteLine)
 
     @cached_property
     def _lineBottom(self) -> int:
@@ -138,7 +90,7 @@ class Graph(tk.Tk):
     @cached_property
     def _yToPixelScale(self) -> float:
         return self._yPixelSpan / self._yRange
-    
+
     def _xToPixel(self, x: float) -> int:
         return round((x - self.xMin) * self._xToPixelScale) + self._lineLeft
 
@@ -200,9 +152,16 @@ class Graph(tk.Tk):
 
         self.points.append(point)
 
-        # TODO: residuals
+    def plotRandomPoint(self):
+        self.plot(randomPoint(self.xMin, self.xMax, self.yMin, self.yMax))
 
-    def removePoint(self, point: Point):
+    def removePoint(self, point: Point = None):
+        try:
+            point = self.points[0] if point is None else point
+        except IndexError:
+            print("Cannot delete points without any points on screen")
+            return
+
         self.canvas.delete(point.toTag())
 
         try:
@@ -259,10 +218,10 @@ class Graph(tk.Tk):
         if not updateLine:
             line.point1, line.point2 = pLeft, pRight
 
-        if addToLines:
-            self.lines.append(line)
-
         tag = line.toTag() if tag is None else tag
+
+        if addToLines:
+            self.linesAndTags.append((line, tag))
 
         self.canvas.create_line(self._xToPixel(pLeft.x), self._yToPixel(pLeft.y),
                                 self._xToPixel(pRight.x), self._yToPixel(pRight.y),
@@ -270,16 +229,20 @@ class Graph(tk.Tk):
 
         self.updateResiduals()
 
+    def createRandomLine(self, **kwargs):
+        self.createLine(randomLine(self.xMin, self.xMax, self.yMin, self.yMax), **kwargs)
+
     def deleteLine(self, line: Line = None):
         try:
-            line = self.lines[0] if line is None else line
+            withoutBestFit = [(line, tag) for line, tag in self.linesAndTags if tag != "bestFit"]
+            line, tag = (line, line.toTag()) if line is not None else withoutBestFit[0]
         except IndexError:
-            print("Cannot delete a line without lines of screen. If you are trying to delete a best fit line, use the",
-                  '"removeBestFitLine button"')
+            print("Cannot delete a line without lines of screen. If you are trying to remove a best fit line,",
+                  "use the", '"hide line of best fit line" button.')
             return
 
-        self.canvas.delete(line.toTag())
-        self.lines.remove(line)
+        self.canvas.delete(tag)
+        self.linesAndTags.remove((line, tag))
 
         list(map(lambda p: self.removePoint(p), line.displayedPoints))
 
@@ -291,6 +254,10 @@ class Graph(tk.Tk):
 
     def createBestFitLine(self):
         self.removeBestFitLine()
+
+        if not self.points:
+            print("There are no points on screen. Please plot a point")
+            return
 
         pointListX, pointListY = [point.x for point in self.points], [point.y for point in self.points]
         polyCoefficients = polyfit(pointListX, pointListY, 1)
@@ -304,12 +271,12 @@ class Graph(tk.Tk):
 
     def removeBestFitLine(self):
         self.canvas.delete("bestFit")
-        self.lines = [line for line in self.lines if not isinstance(line, SlopeIntercept)]
+        self.linesAndTags = [(line, tag) for line, tag in self.linesAndTags if tag != "bestFit"]
 
         self.updateResiduals()
 
     def toggleResidual(self):
-        if len(self.lines) != 1 and not self.showResidual:
+        if len(self.linesAndTags) != 1 and not self.showResidual:
             print("Cannot show residuals when there is not exactly 1 line on screen")
             return
 
@@ -317,10 +284,10 @@ class Graph(tk.Tk):
         self.updateResiduals()
 
     def updateResiduals(self):
-        self.showResidual = self.showResidual and len(self.lines) == 1
+        self.showResidual = self.showResidual and len(self.linesAndTags) == 1
 
         if self.showResidual:
-            list(map(lambda point: self.showResidualPoint(point, self.lines[0]), self.points))
+            list(map(lambda point: self.showResidualPoint(point, self.linesAndTags[0][0]), self.points))
         else:
             self.canvas.delete("residual")
 
@@ -354,7 +321,7 @@ class Graph(tk.Tk):
 
     def mouseRelease(self):
         self.draggingPoint = None
-    
+
     def motion(self, event):
         p = self.draggingPoint
 
@@ -366,9 +333,9 @@ class Graph(tk.Tk):
 
         self.updatePoint(p, event.x, event.y)
 
-        if self.dragLine and self.lines:
+        if self.dragLine and self.linesAndTags:
             try:
-                line = next(line for line in self.lines if p in line)
+                line = next(line for line, _ in self.linesAndTags if p in line)
                 self.updateLine(line)
             except StopIteration:
                 pass
