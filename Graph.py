@@ -10,6 +10,7 @@ from functools import cached_property
 from itertools import takewhile, count
 
 from numpy import polyfit
+import numpy as np
 
 
 class Graph(tk.Tk, GraphSettings):
@@ -132,14 +133,14 @@ class Graph(tk.Tk, GraphSettings):
                            count(self._lineLeft, self.xLabelInterval * self._xToPixelScale)):
             self.canvas.create_line(x, self._lineBottom, x, self._lineBottom + self.labelLength, tags="xAxis")
             self.canvas.create_text(x, self._lineBottom + self.labelLength + self.fontSize,
-                                    text=str(self._pixelToX(x)), justify=tk.CENTER, font=(self.font, self.fontSize),
+                                    text=f"{self._pixelToX(x):.1f}", justify=tk.CENTER, font=(self.font, self.fontSize),
                                     tags="xLabel")
 
         for y in takewhile(lambda yValue: yValue >= self._lineTop,
                            count(self._lineBottom, - self.yLabelInterval * self._yToPixelScale)):
             self.canvas.create_line(self._lineLeft, y, self._lineLeft - self.labelLength, y, tags="yAxis")
             self.canvas.create_text(self._lineLeft - self.labelLength - self.fontSize, y,
-                                    text=str(self._pixelToY(y)), justify=tk.CENTER, font=(self.font, self.fontSize),
+                                    text=f"{self._pixelToY(y):.1f}", justify=tk.CENTER, font=(self.font, self.fontSize),
                                     tags="yLabel")
 
     def plot(self, point: Point, partOfLine=False):
@@ -259,15 +260,30 @@ class Graph(tk.Tk, GraphSettings):
             print(f"There are not enough points on screen ({len(self.points)}). Please plot a point")
             return
 
-        pointListX, pointListY = [point.x for point in self.points], [point.y for point in self.points]
-        polyCoefficients = polyfit(pointListX, pointListY, 1)
-
-        slope, intercept = polyCoefficients[0], polyCoefficients[1]
+        # intercept, slope = self.bestFitCoefficientsNumpy(self.points)
+        intercept, slope = self.bestFitCoefficients(self.points)
 
         line = SlopeIntercept(slope, intercept)
         self.createLine(line, plotPoints=False, updateLine=False, addToLines=True, tag="bestFit")
 
         self.updateResiduals()
+
+    @staticmethod
+    def bestFitCoefficients(points: list[Point]) -> list[float]:
+
+        X = np.array([np.array(point.x) for point in points]).reshape((-1, len(points)))  # [p, n]
+        X = np.hstack((np.ones((len(points), 1)), np.transpose(X)))  # [n, p+1]
+        y = np.array([point.y for point in points])  # [1, n]
+
+        b = np.linalg.inv(np.transpose(X)@X)@np.transpose(X)@y
+
+        return b
+
+    @staticmethod
+    def bestFitCoefficientsNumpy(points: list[Point]) -> list[float]:
+        pointListX, pointListY = [point.x for point in points], [point.y for point in points]
+        coefficients = polyfit(pointListX, pointListY, 1)
+        return [coefficients[0], coefficients[1]]
 
     def removeBestFitLine(self):
         self.canvas.delete("bestFit")
